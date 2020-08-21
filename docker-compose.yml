@@ -1,0 +1,18 @@
+version: "3"
+
+services:
+  portainer:
+    image: ${PORT_IMG:-portainer/portainer}:${PORT_TAG:-latest}
+    container_name: ${PORT_CONTAINER_NAME:-portainer}
+    restart: ${PORT_RESTART:-unless-stopped}
+    volumes:
+      - ${LOCAL_STACK_DIR}/portainer/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - portainer.env
+    command: --no-analytics --admin-password ${ENCRYPTED_PASSWORD}
+
+networks:
+  default:
+    external:
+      name: ${NETWORK}
