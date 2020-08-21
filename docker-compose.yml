@@ -10,7 +10,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - portainer.env
-    command: --no-analytics --admin-password ${ENCRYPTED_PASSWORD}
+    command: --no-analytics --admin-password ${PORT_ENCRYPTED_PWD}
 
 networks:
   default:
