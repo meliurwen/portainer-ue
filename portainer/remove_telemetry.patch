@@ -1,0 +1,618 @@
+diff --git a/api/bolt/migrator/migrate_dbversion24.go b/api/bolt/migrator/migrate_dbversion24.go
+index b4843f2..4749607 100644
+--- a/api/bolt/migrator/migrate_dbversion24.go
++++ b/api/bolt/migrator/migrate_dbversion24.go
+@@ -15,7 +15,6 @@ func (m *Migrator) updateSettingsToDB25() error {
+ 	}
+ 
+ 	legacySettings.UserSessionTimeout = portainer.DefaultUserSessionTimeout
+-	legacySettings.EnableTelemetry = true
+ 
+ 	legacySettings.AllowContainerCapabilitiesForRegularUsers = true
+ 
+diff --git a/api/cli/cli.go b/api/cli/cli.go
+index ca65348..9b4864d 100644
+--- a/api/cli/cli.go
++++ b/api/cli/cli.go
+@@ -2,7 +2,6 @@ package cli
+ 
+ import (
+ 	"errors"
+-	"log"
+ 	"time"
+ 
+ 	"github.com/portainer/portainer/api"
+@@ -36,7 +35,6 @@ func (*Service) ParseFlags(version string) (*portainer.CLIFlags, error) {
+ 		Data:                      kingpin.Flag("data", "Path to the folder where the data is stored").Default(defaultDataDirectory).Short('d').String(),
+ 		EndpointURL:               kingpin.Flag("host", "Endpoint URL").Short('H').String(),
+ 		EnableEdgeComputeFeatures: kingpin.Flag("edge-compute", "Enable Edge Compute features").Bool(),
+-		NoAnalytics:               kingpin.Flag("no-analytics", "Disable Analytics in app (deprecated)").Bool(),
+ 		TLS:                       kingpin.Flag("tlsverify", "TLS support").Default(defaultTLS).Bool(),
+ 		TLSSkipVerify:             kingpin.Flag("tlsskipverify", "Disable TLS server verification").Default(defaultTLSSkipVerify).Bool(),
+ 		TLSCacert:                 kingpin.Flag("tlscacert", "Path to the CA").Default(defaultTLSCACertPath).String(),
+@@ -69,8 +67,6 @@ func (*Service) ParseFlags(version string) (*portainer.CLIFlags, error) {
+ // ValidateFlags validates the values of the flags.
+ func (*Service) ValidateFlags(flags *portainer.CLIFlags) error {
+ 
+-	displayDeprecationWarnings(flags)
+-
+ 	err := validateEndpointURL(*flags.EndpointURL)
+ 	if err != nil {
+ 		return err
+@@ -88,12 +84,6 @@ func (*Service) ValidateFlags(flags *portainer.CLIFlags) error {
+ 	return nil
+ }
+ 
+-func displayDeprecationWarnings(flags *portainer.CLIFlags) {
+-	if *flags.NoAnalytics {
+-		log.Println("Warning: The --no-analytics flag has been kept to allow migration of instances running a previous version of Portainer with this flag enabled, to version 2.0 where enabling this flag will have no effect.")
+-	}
+-}
+-
+ func validateEndpointURL(endpointURL string) error {
+ 	if endpointURL != "" {
+ 		if !strings.HasPrefix(endpointURL, "unix://") && !strings.HasPrefix(endpointURL, "tcp://") && !strings.HasPrefix(endpointURL, "npipe://") {
+diff --git a/api/cmd/portainer/main.go b/api/cmd/portainer/main.go
+index 5d83916..b24277a 100644
+--- a/api/cmd/portainer/main.go
++++ b/api/cmd/portainer/main.go
+@@ -166,7 +166,6 @@ func updateSettingsFromFlags(dataStore portainer.DataStore, flags *portainer.CLI
+ 	settings.LogoURL = *flags.Logo
+ 	settings.SnapshotInterval = *flags.SnapshotInterval
+ 	settings.EnableEdgeComputeFeatures = *flags.EnableEdgeComputeFeatures
+-	settings.EnableTelemetry = true
+ 
+ 	if *flags.Templates != "" {
+ 		settings.TemplatesURL = *flags.Templates
+diff --git a/api/http/handler/settings/settings_public.go b/api/http/handler/settings/settings_public.go
+index e94f501..f0d4f42 100644
+--- a/api/http/handler/settings/settings_public.go
++++ b/api/http/handler/settings/settings_public.go
+@@ -22,7 +22,6 @@ type publicSettingsResponse struct {
+ 	EnableHostManagementFeatures              bool                           `json:"EnableHostManagementFeatures"`
+ 	EnableEdgeComputeFeatures                 bool                           `json:"EnableEdgeComputeFeatures"`
+ 	OAuthLoginURI                             string                         `json:"OAuthLoginURI"`
+-	EnableTelemetry                           bool                           `json:"EnableTelemetry"`
+ }
+ 
+ // GET request on /api/settings/public
+@@ -44,7 +43,6 @@ func (handler *Handler) settingsPublic(w http.ResponseWriter, r *http.Request) *
+ 		AllowContainerCapabilitiesForRegularUsers: settings.AllowContainerCapabilitiesForRegularUsers,
+ 		EnableHostManagementFeatures:              settings.EnableHostManagementFeatures,
+ 		EnableEdgeComputeFeatures:                 settings.EnableEdgeComputeFeatures,
+-		EnableTelemetry:                           settings.EnableTelemetry,
+ 		OAuthLoginURI: fmt.Sprintf("%s?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&prompt=login",
+ 			settings.OAuthSettings.AuthorizationURI,
+ 			settings.OAuthSettings.ClientID,
+diff --git a/api/http/handler/settings/settings_update.go b/api/http/handler/settings/settings_update.go
+index fbdf47b..b44b825 100644
+--- a/api/http/handler/settings/settings_update.go
++++ b/api/http/handler/settings/settings_update.go
+@@ -32,7 +32,6 @@ type settingsUpdatePayload struct {
+ 	EdgeAgentCheckinInterval                  *int
+ 	EnableEdgeComputeFeatures                 *bool
+ 	UserSessionTimeout                        *string
+-	EnableTelemetry                           *bool
+ }
+ 
+ func (payload *settingsUpdatePayload) Validate(r *http.Request) error {
+@@ -162,10 +161,6 @@ func (handler *Handler) settingsUpdate(w http.ResponseWriter, r *http.Request) *
+ 		settings.AllowDeviceMappingForRegularUsers = *payload.AllowDeviceMappingForRegularUsers
+ 	}
+ 
+-	if payload.EnableTelemetry != nil {
+-		settings.EnableTelemetry = *payload.EnableTelemetry
+-	}
+-
+ 	tlsError := handler.updateTLS(settings)
+ 	if tlsError != nil {
+ 		return tlsError
+diff --git a/api/portainer.go b/api/portainer.go
+index e68e0c2..5e49027 100644
+--- a/api/portainer.go
++++ b/api/portainer.go
+@@ -44,7 +44,6 @@ type (
+ 		EndpointURL               *string
+ 		Labels                    *[]Pair
+ 		Logo                      *string
+-		NoAnalytics               *bool
+ 		Templates                 *string
+ 		TLS                       *bool
+ 		TLSSkipVerify             *bool
+@@ -533,7 +532,6 @@ type (
+ 		EdgeAgentCheckinInterval                  int                  `json:"EdgeAgentCheckinInterval"`
+ 		EnableEdgeComputeFeatures                 bool                 `json:"EnableEdgeComputeFeatures"`
+ 		UserSessionTimeout                        string               `json:"UserSessionTimeout"`
+-		EnableTelemetry                           bool                 `json:"EnableTelemetry"`
+ 
+ 		// Deprecated fields
+ 		DisplayDonationHeader       bool
+diff --git a/app/__module.js b/app/__module.js
+index bc835f9..dadda0f 100644
+--- a/app/__module.js
++++ b/app/__module.js
+@@ -3,9 +3,6 @@ import '@babel/polyfill';
+ 
+ import angular from 'angular';
+ 
+-import './matomo-setup';
+-import './assets/js/angulartics-matomo';
+-
+ import './agent';
+ import './azure/_module';
+ import './docker/__module';
+@@ -38,8 +35,6 @@ angular.module('portainer', [
+   'portainer.integrations',
+   'rzModule',
+   'moment-picker',
+-  'angulartics',
+-  'angulartics.matomo',
+ ]);
+ 
+ if (require) {
+diff --git a/app/assets/js/angulartics-matomo.js b/app/assets/js/angulartics-matomo.js
+deleted file mode 100644
+index 1b6211c..0000000
+--- a/app/assets/js/angulartics-matomo.js
++++ /dev/null
+@@ -1,223 +0,0 @@
+-import angular from 'angular';
+-
+-// forked from https://github.com/angulartics/angulartics-piwik/blob/master/src/angulartics-piwik.js
+-
+-/* global _paq */
+-/**
+- * @ngdoc overview
+- * @name angulartics.piwik
+- * Enables analytics support for Piwik/Matomo (http://piwik.org/docs/tracking-api/)
+- */
+-angular.module('angulartics.matomo', ['angulartics']).config([
+-  '$analyticsProvider',
+-  '$windowProvider',
+-  function ($analyticsProvider, $windowProvider) {
+-    var $window = $windowProvider.$get();
+-
+-    $analyticsProvider.settings.pageTracking.trackRelativePath = true;
+-
+-    // Add piwik specific trackers to angulartics API
+-
+-    // Requires the CustomDimensions plugin for Piwik.
+-    $analyticsProvider.api.setCustomDimension = function (dimensionId, value) {
+-      if ($window._paq) {
+-        $window._paq.push(['setCustomDimension', dimensionId, value]);
+-      }
+-    };
+-
+-    // Requires the CustomDimensions plugin for Piwik.
+-    $analyticsProvider.api.deleteCustomDimension = function (dimensionId) {
+-      if ($window._paq) {
+-        $window._paq.push(['deleteCustomDimension', dimensionId]);
+-      }
+-    };
+-
+-    // scope: visit or page. Defaults to 'page'
+-    $analyticsProvider.api.setCustomVariable = function (varIndex, varName, value, scope) {
+-      if ($window._paq) {
+-        scope = scope || 'page';
+-        $window._paq.push(['setCustomVariable', varIndex, varName, value, scope]);
+-      }
+-    };
+-
+-    // scope: visit or page. Defaults to 'page'
+-    $analyticsProvider.api.deleteCustomVariable = function (varIndex, scope) {
+-      if ($window._paq) {
+-        scope = scope || 'page';
+-        $window._paq.push(['deleteCustomVariable', varIndex, scope]);
+-      }
+-    };
+-
+-    // trackSiteSearch(keyword, category, [searchCount])
+-    $analyticsProvider.api.trackSiteSearch = function (keyword, category, searchCount) {
+-      // keyword is required
+-      if ($window._paq && keyword) {
+-        var params = ['trackSiteSearch', keyword, category || false];
+-
+-        // searchCount is optional
+-        if (angular.isDefined(searchCount)) {
+-          params.push(searchCount);
+-        }
+-
+-        $window._paq.push(params);
+-      }
+-    };
+-
+-    // logs a conversion for goal 1. revenue is optional
+-    // trackGoal(goalID, [revenue]);
+-    $analyticsProvider.api.trackGoal = function (goalID, revenue) {
+-      if ($window._paq) {
+-        _paq.push(['trackGoal', goalID, revenue || 0]);
+-      }
+-    };
+-
+-    // track outlink or download
+-    // linkType is 'link' or 'download', 'link' by default
+-    // trackLink(url, [linkType]);
+-    $analyticsProvider.api.trackLink = function (url, linkType) {
+-      var type = linkType || 'link';
+-      if ($window._paq) {
+-        $window._paq.push(['trackLink', url, type]);
+-      }
+-    };
+-
+-    // Set default angulartics page and event tracking
+-
+-    $analyticsProvider.registerSetUsername(function (username) {
+-      if ($window._paq) {
+-        $window._paq.push(['setUserId', username]);
+-      }
+-    });
+-
+-    // locationObj is the angular $location object
+-    $analyticsProvider.registerPageTrack(function (path) {
+-      if ($window._paq) {
+-        $window._paq.push(['setDocumentTitle', $window.document.title]);
+-        $window._paq.push(['setReferrerUrl', '']);
+-        $window._paq.push(['setCustomUrl', 'http://portainer-ce.app' + path]);
+-        $window._paq.push(['trackPageView']);
+-      }
+-    });
+-
+-    /**
+-     * @name eventTrack
+-     * Track a basic event in Piwik, or send an ecommerce event.
+-     *
+-     * @param {string} action A string corresponding to the type of event that needs to be tracked.
+-     * @param {object} properties The properties that need to be logged with the event.
+-     */
+-    $analyticsProvider.registerEventTrack(function (action, properties) {
+-      if ($window._paq) {
+-        properties = properties || {};
+-
+-        switch (action) {
+-          /**
+-           * @description Sets the current page view as a product or category page view. When you call
+-           * setEcommerceView it must be followed by a call to trackPageView to record the product or
+-           * category page view.
+-           *
+-           * @link https://piwik.org/docs/ecommerce-analytics/#tracking-product-page-views-category-page-views-optional
+-           * @link https://developer.piwik.org/api-reference/tracking-javascript#ecommerce
+-           *
+-           * @property productSKU (required) SKU: Product unique identifier
+-           * @property productName (optional) Product name
+-           * @property categoryName (optional) Product category, or array of up to 5 categories
+-           * @property price (optional) Product Price as displayed on the page
+-           */
+-          case 'setEcommerceView':
+-            $window._paq.push(['setEcommerceView', properties.productSKU, properties.productName, properties.categoryName, properties.price]);
+-            break;
+-
+-          /**
+-           * @description Adds a product into the ecommerce order. Must be called for each product in
+-           * the order.
+-           *
+-           * @link https://piwik.org/docs/ecommerce-analytics/#tracking-ecommerce-orders-items-purchased-required
+-           * @link https://developer.piwik.org/api-reference/tracking-javascript#ecommerce
+-           *
+-           * @property productSKU (required) SKU: Product unique identifier
+-           * @property productName (optional) Product name
+-           * @property categoryName (optional) Product category, or array of up to 5 categories
+-           * @property price (recommended) Product price
+-           * @property quantity (optional, default to 1) Product quantity
+-           */
+-          case 'addEcommerceItem':
+-            $window._paq.push(['addEcommerceItem', properties.productSKU, properties.productName, properties.productCategory, properties.price, properties.quantity]);
+-            break;
+-
+-          /**
+-           * @description Tracks a shopping cart. Call this javascript function every time a user is
+-           * adding, updating or deleting a product from the cart.
+-           *
+-           * @link https://piwik.org/docs/ecommerce-analytics/#tracking-add-to-cart-items-added-to-the-cart-optional
+-           * @link https://developer.piwik.org/api-reference/tracking-javascript#ecommerce
+-           *
+-           * @property grandTotal (required) Cart amount
+-           */
+-          case 'trackEcommerceCartUpdate':
+-            $window._paq.push(['trackEcommerceCartUpdate', properties.grandTotal]);
+-            break;
+-
+-          /**
+-           * @description Tracks an Ecommerce order, including any ecommerce item previously added to
+-           * the order. orderId and grandTotal (ie. revenue) are required parameters.
+-           *
+-           * @link https://piwik.org/docs/ecommerce-analytics/#tracking-ecommerce-orders-items-purchased-required
+-           * @link https://developer.piwik.org/api-reference/tracking-javascript#ecommerce
+-           *
+-           * @property orderId (required) Unique Order ID
+-           * @property grandTotal (required) Order Revenue grand total (includes tax, shipping, and subtracted discount)
+-           * @property subTotal (optional) Order sub total (excludes shipping)
+-           * @property tax (optional) Tax amount
+-           * @property shipping (optional) Shipping amount
+-           * @property discount (optional) Discount offered (set to false for unspecified parameter)
+-           */
+-          case 'trackEcommerceOrder':
+-            $window._paq.push(['trackEcommerceOrder', properties.orderId, properties.grandTotal, properties.subTotal, properties.tax, properties.shipping, properties.discount]);
+-            break;
+-
+-          /**
+-           * @description Logs an event with an event category (Videos, Music, Games...), an event
+-           * action (Play, Pause, Duration, Add Playlist, Downloaded, Clicked...), and an optional
+-           * event name and optional numeric value.
+-           *
+-           * @link https://piwik.org/docs/event-tracking/
+-           * @link https://developer.piwik.org/api-reference/tracking-javascript#using-the-tracker-object
+-           *
+-           * @property category
+-           * @property action
+-           * @property name (optional, recommended)
+-           * @property value (optional)
+-           */
+-          default:
+-            // PAQ requires that eventValue be an integer, see: http://piwik.org/docs/event-tracking
+-            if (properties.value) {
+-              var parsed = parseInt(properties.value, 10);
+-              properties.value = isNaN(parsed) ? 0 : parsed;
+-            }
+-
+-            $window._paq.push([
+-              'trackEvent',
+-              properties.category,
+-              action,
+-              properties.name || properties.label, // Changed in favour of Piwik documentation. Added fallback so it's backwards compatible.
+-              properties.value,
+-            ]);
+-        }
+-      }
+-    });
+-
+-    /**
+-     * @name exceptionTrack
+-     * Sugar on top of the eventTrack method for easily handling errors
+-     *
+-     * @param {object} error An Error object to track: error.toString() used for event 'action', error.stack used for event 'label'.
+-     * @param {object} cause The cause of the error given from $exceptionHandler, not used.
+-     */
+-    $analyticsProvider.registerExceptionTrack(function (error) {
+-      if ($window._paq) {
+-        $window._paq.push(['trackEvent', 'Exceptions', error.toString(), error.stack, 0]);
+-      }
+-    });
+-  },
+-]);
+diff --git a/app/matomo-setup.js b/app/matomo-setup.js
+deleted file mode 100644
+index b85aa44..0000000
+--- a/app/matomo-setup.js
++++ /dev/null
+@@ -1,14 +0,0 @@
+-const _paq = (window._paq = window._paq || []);
+-/* tracker methods like "setCustomDimension" should be called before "trackPageView" */
+-_paq.push(['enableLinkTracking']);
+-
+-var u = 'https://portainer-ce.matomo.cloud/';
+-_paq.push(['setTrackerUrl', u + 'matomo.php']);
+-_paq.push(['setSiteId', '1']);
+-var d = document,
+-  g = d.createElement('script'),
+-  s = d.getElementsByTagName('script')[0];
+-g.type = 'text/javascript';
+-g.async = true;
+-g.src = '//cdn.matomo.cloud/portainer-ce.matomo.cloud/matomo.js';
+-s.parentNode.insertBefore(g, s);
+diff --git a/app/portainer/models/settings.js b/app/portainer/models/settings.js
+index 40f0003..bec5e78 100644
+--- a/app/portainer/models/settings.js
++++ b/app/portainer/models/settings.js
+@@ -17,7 +17,6 @@ export function SettingsViewModel(data) {
+   this.EdgeAgentCheckinInterval = data.EdgeAgentCheckinInterval;
+   this.EnableEdgeComputeFeatures = data.EnableEdgeComputeFeatures;
+   this.UserSessionTimeout = data.UserSessionTimeout;
+-  this.EnableTelemetry = data.EnableTelemetry;
+ }
+ 
+ export function PublicSettingsViewModel(settings) {
+@@ -33,7 +32,6 @@ export function PublicSettingsViewModel(settings) {
+   this.EnableEdgeComputeFeatures = settings.EnableEdgeComputeFeatures;
+   this.LogoURL = settings.LogoURL;
+   this.OAuthLoginURI = settings.OAuthLoginURI;
+-  this.EnableTelemetry = settings.EnableTelemetry;
+ }
+ 
+ export function LDAPSettingsViewModel(data) {
+diff --git a/app/portainer/services/stateManager.js b/app/portainer/services/stateManager.js
+index cf988e5..98de113 100644
+--- a/app/portainer/services/stateManager.js
++++ b/app/portainer/services/stateManager.js
+@@ -10,7 +10,6 @@ angular.module('portainer.app').factory('StateManager', [
+   'StatusService',
+   'APPLICATION_CACHE_VALIDITY',
+   'AgentPingService',
+-  '$analytics',
+   function StateManagerFactory(
+     $q,
+     SystemService,
+@@ -20,8 +19,7 @@ angular.module('portainer.app').factory('StateManager', [
+     SettingsService,
+     StatusService,
+     APPLICATION_CACHE_VALIDITY,
+-    AgentPingService,
+-    $analytics
++    AgentPingService
+   ) {
+     'use strict';
+ 
+@@ -117,15 +115,8 @@ angular.module('portainer.app').factory('StateManager', [
+       LocalStorage.storeApplicationState(state.application);
+     };
+ 
+-    manager.updateEnableTelemetry = function updateEnableTelemetry(enableTelemetry) {
+-      state.application.enableTelemetry = enableTelemetry;
+-      $analytics.setOptOut(!enableTelemetry);
+-      LocalStorage.storeApplicationState(state.application);
+-    };
+-
+     function assignStateFromStatusAndSettings(status, settings) {
+       state.application.version = status.Version;
+-      state.application.enableTelemetry = settings.EnableTelemetry;
+       state.application.logo = settings.LogoURL;
+       state.application.snapshotInterval = settings.SnapshotInterval;
+       state.application.enableHostManagementFeatures = settings.EnableHostManagementFeatures;
+@@ -151,7 +142,6 @@ angular.module('portainer.app').factory('StateManager', [
+           var status = data.status;
+           var settings = data.settings;
+           assignStateFromStatusAndSettings(status, settings);
+-          $analytics.setOptOut(!settings.EnableTelemetry);
+           LocalStorage.storeApplicationState(state.application);
+           deferred.resolve(state);
+         })
+@@ -189,7 +179,6 @@ angular.module('portainer.app').factory('StateManager', [
+         } else {
+           state.application = applicationState;
+           state.loading = false;
+-          $analytics.setOptOut(!state.application.enableTelemetry);
+           deferred.resolve(state);
+         }
+       } else {
+diff --git a/app/portainer/views/init/admin/initAdmin.html b/app/portainer/views/init/admin/initAdmin.html
+index b3643ea..7b1106e 100644
+--- a/app/portainer/views/init/admin/initAdmin.html
++++ b/app/portainer/views/init/admin/initAdmin.html
+@@ -81,18 +81,6 @@
+                 </button>
+               </div>
+             </div>
+-            <!-- !actions -->
+-            <!-- enableTelemetry-->
+-            <div class="form-group">
+-              <div class="col-sm-12">
+-                <input type="checkbox" name="toggle_enableTelemetry" ng-model="formValues.enableTelemetry" />
+-                <span class="text-muted small" style="margin-left: 2px;"
+-                  >Allow collection of anonymous statistics. You can find more information about this in our
+-                  <a href="https://www.portainer.io/documentation/in-app-analytics-and-privacy-policy/" target="_blank">privacy policy</a>.</span
+-                >
+-              </div>
+-            </div>
+-            <!-- !enableTelemetry-->
+           </form>
+           <!-- !init password form -->
+         </div>
+diff --git a/app/portainer/views/init/admin/initAdminController.js b/app/portainer/views/init/admin/initAdminController.js
+index 63bd27d..40a0b28 100644
+--- a/app/portainer/views/init/admin/initAdminController.js
++++ b/app/portainer/views/init/admin/initAdminController.js
+@@ -15,7 +15,6 @@ angular.module('portainer.app').controller('InitAdminController', [
+       Username: 'admin',
+       Password: '',
+       ConfirmPassword: '',
+-      enableTelemetry: true,
+     };
+ 
+     $scope.state = {
+@@ -31,9 +30,6 @@ angular.module('portainer.app').controller('InitAdminController', [
+         .then(function success() {
+           return Authentication.login(username, password);
+         })
+-        .then(function success() {
+-          return SettingsService.update({ enableTelemetry: $scope.formValues.enableTelemetry });
+-        })
+         .then(() => {
+           return StateManager.initialize();
+         })
+diff --git a/app/portainer/views/settings/settings.html b/app/portainer/views/settings/settings.html
+index 01008af..cd4ec60 100644
+--- a/app/portainer/views/settings/settings.html
++++ b/app/portainer/views/settings/settings.html
+@@ -26,18 +26,6 @@
+               <label class="switch" style="margin-left: 20px;"> <input type="checkbox" name="toggle_logo" ng-model="formValues.customLogo" /><i></i> </label>
+             </div>
+           </div>
+-          <div class="form-group">
+-            <div class="col-sm-12">
+-              <label for="toggle_enableTelemetry" class="control-label text-left">
+-                Allow the collection of anonymous statistics
+-              </label>
+-              <label class="switch" style="margin-left: 20px;"> <input type="checkbox" name="toggle_enableTelemetry" ng-model="formValues.enableTelemetry" /><i></i> </label>
+-            </div>
+-            <div class="col-sm-12 text-muted small" style="margin-top: 10px;">
+-              You can find more information about this in our
+-              <a href="https://www.portainer.io/documentation/in-app-analytics-and-privacy-policy/" target="_blank">privacy policy</a>.
+-            </div>
+-          </div>
+           <div ng-if="formValues.customLogo">
+             <div class="form-group">
+               <span class="col-sm-12 text-muted small">
+diff --git a/app/portainer/views/settings/settingsController.js b/app/portainer/views/settings/settingsController.js
+index 5bd78d9..09e6f86 100644
+--- a/app/portainer/views/settings/settingsController.js
++++ b/app/portainer/views/settings/settingsController.js
+@@ -36,7 +36,6 @@ angular.module('portainer.app').controller('SettingsController', [
+       allowDeviceMappingForRegularUsers: false,
+       allowStackManagementForRegularUsers: false,
+       disableContainerCapabilitiesForRegularUsers: false,
+-      enableTelemetry: false,
+     };
+ 
+     $scope.isContainerEditDisabled = function isContainerEditDisabled() {
+@@ -86,7 +85,6 @@ angular.module('portainer.app').controller('SettingsController', [
+       settings.AllowDeviceMappingForRegularUsers = !$scope.formValues.disableDeviceMappingForRegularUsers;
+       settings.AllowStackManagementForRegularUsers = !$scope.formValues.disableStackManagementForRegularUsers;
+       settings.AllowContainerCapabilitiesForRegularUsers = !$scope.formValues.disableContainerCapabilitiesForRegularUsers;
+-      settings.EnableTelemetry = $scope.formValues.enableTelemetry;
+ 
+       $scope.state.actionInProgress = true;
+       updateSettings(settings);
+@@ -107,7 +105,6 @@ angular.module('portainer.app').controller('SettingsController', [
+           StateManager.updateAllowContainerCapabilitiesForRegularUsers(settings.AllowContainerCapabilitiesForRegularUsers);
+           StateManager.updateAllowPrivilegedModeForRegularUsers(settings.AllowPrivilegedModeForRegularUsers);
+           StateManager.updateAllowBindMountsForRegularUsers(settings.AllowBindMountsForRegularUsers);
+-          StateManager.updateEnableTelemetry(settings.EnableTelemetry);
+           $state.reload();
+         })
+         .catch(function error(err) {
+@@ -136,7 +133,6 @@ angular.module('portainer.app').controller('SettingsController', [
+           $scope.formValues.disableDeviceMappingForRegularUsers = !settings.AllowDeviceMappingForRegularUsers;
+           $scope.formValues.disableStackManagementForRegularUsers = !settings.AllowStackManagementForRegularUsers;
+           $scope.formValues.disableContainerCapabilitiesForRegularUsers = !settings.AllowContainerCapabilitiesForRegularUsers;
+-          $scope.formValues.enableTelemetry = settings.EnableTelemetry;
+         })
+         .catch(function error(err) {
+           Notifications.error('Failure', err, 'Unable to retrieve application settings');
+diff --git a/app/vendors.js b/app/vendors.js
+index 8bdc36d..b9ab85a 100644
+--- a/app/vendors.js
++++ b/app/vendors.js
+@@ -36,6 +36,5 @@ import 'js-yaml/dist/js-yaml.js';
+ import 'angular-ui-bootstrap';
+ import 'angular-moment-picker';
+ import 'angular-multiselect/isteven-multi-select.js';
+-import 'angulartics/dist/angulartics.min.js';
+ 
+ window.angular = angular;
+diff --git a/package.json b/package.json
+index 68ee834..d047c05 100644
+--- a/package.json
++++ b/package.json
+@@ -68,7 +68,6 @@
+     "angular-utils-pagination": "~0.11.1",
+     "angularjs-scroll-glue": "^2.2.0",
+     "angularjs-slider": "^6.4.0",
+-    "angulartics": "^1.6.0",
+     "babel-plugin-angularjs-annotate": "^0.10.0",
+     "bootbox": "^5.4.0",
+     "bootstrap": "^3.4.0",
+diff --git a/yarn.lock b/yarn.lock
+index 1abaa00..5f24f30 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -1297,11 +1297,6 @@ angularjs-slider@^6.4.0:
+   resolved "https://registry.yarnpkg.com/angularjs-slider/-/angularjs-slider-6.7.0.tgz#eb2229311b81b79315a36e7b5eb700e128f50319"
+   integrity sha512-Cizsuax65wN2Y+htmA3safE5ALOSCyWcKyWkziaO8vCVymi26bQQs6kKDhkYc8GFix/KE7Oc9gH3QLlTUgD38w==
+ 
+-angulartics@^1.6.0:
+-  version "1.6.0"
+-  resolved "https://registry.yarnpkg.com/angulartics/-/angulartics-1.6.0.tgz#a89c17ef8ea2334ebced65d6265951846f848172"
+-  integrity sha512-fywhCi1InawcX+rpLv9NQ32Ed87KoZeH20SUIsRUz9dYJSxuk4/uxiKiopITveGxTC8THYHFEATj9Y/X+BvMqA==
+-
+ ansi-colors@^3.0.0, ansi-colors@^3.2.1:
+   version "3.2.4"
+   resolved "https://registry.yarnpkg.com/ansi-colors/-/ansi-colors-3.2.4.tgz#e3a3da4bfbae6c86a9c285625de124a234026fbf"

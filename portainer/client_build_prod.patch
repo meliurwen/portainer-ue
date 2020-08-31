@@ -1,0 +1,11 @@
+--- gruntfile.js.original	2020-08-31 18:53:26.765587327 +0200
++++ gruntfile.js	2020-08-31 18:54:44.121105223 +0200
+@@ -41,7 +41,7 @@
+     'shell:download_kubectl_binary:linux:' + arch,
+   ]);
+ 
+-  grunt.registerTask('build:client', ['config:dev', 'env:dev', 'webpack:dev']);
++  grunt.registerTask('build:client', ['config:prod', 'env:prod', 'webpack:prod']);
+ 
+   grunt.registerTask('build', ['build:server', 'build:client', 'copy:assets']);
+ 
