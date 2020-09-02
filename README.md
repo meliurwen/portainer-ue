@@ -2,7 +2,15 @@
 
 Unofficial build of Portainer 100% telemetry-free!
 
-## Run
+## Customize
+
+Simply place your custom files in [this](portainer/root_builder/custom) folder following the direcotry tree of the [Official Portainer's repo](https://github.com/portainer/portainer).
+
+Your files will replace the original ones after the frontend app is patched, but before it is built.
+
++ **Custom Dir**: `portainer/root_builder/custom`
+
+## Build and Run
 
 Build the patched images and run:
 

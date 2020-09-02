@@ -4,7 +4,7 @@ ARG GOOS
 ARG GOARCH
 ARG GIT_TAG
 
-COPY remove_telemetry.patch /
+COPY root_builder/remove_telemetry.patch /
 
 RUN apk --update add git patch && \
     git clone --depth 1 --branch $GIT_TAG https://github.com/portainer/portainer.git && \
@@ -16,13 +16,14 @@ FROM node:latest AS builder-client
 
 ARG GIT_TAG
 
-COPY *.patch /
+COPY root_builder /
 
 RUN apt-get update && apt-get install git && \
     git clone --depth 1 --branch $GIT_TAG https://github.com/portainer/portainer.git && \
     cd portainer && \
     patch -p0 < /client_build_prod.patch && \
     git apply /remove_telemetry.patch && \
+    cp -R /custom/* . && \
     yarn && \
     yarn build:client
 
